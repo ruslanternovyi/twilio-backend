@@ -48,15 +48,15 @@ app.post("/voice", (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   let toNumber = req.body.To;
   let fromNumber = req.body.From;
-  let voicemailUrl = req.body.voicemailUrl;
   let channelID = req.body.ChannelID;
 
+  console.log(`fromNumber: ${fromNumber}, toNumber: ${voicemailUrl}`);
   if (toNumber) {
     // Dial the lead's number from your Twilio number
     const dial = twiml.dial({ 
       callerId: fromNumber,
       record: "record-from-answer-dual",
-      action: `${process.env.BASE_URL}/call-status?voicemailUrl=${encodeURIComponent(voicemailUrl)}`,  // final call status
+      action: `${process.env.BASE_URL}/call-status`,  // final call status
       method: "POST"
     });
     
@@ -92,7 +92,6 @@ app.get('/get-call-info', async (req, res) => {
 app.post("/leave-voicemail", async (req, res) => {
   const { fromNumber, toNumber, voicemailUrl } = req.body;
 
-  console.log(voicemailUrl);
   if (!toNumber || !voicemailUrl) {
     return res.status(400).json({ error: "toNumber and voicemailUrl required" });
   }
