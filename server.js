@@ -51,6 +51,8 @@ app.post("/voice", (req, res) => {
   let voicemailUrl = req.body.voicemailUrl;
   let channelID = req.body.ChannelID;
 
+  console.log("from number:::::", frontNumber);
+  console.log("to number:::::", toNumber);
   if (toNumber) {
     // Dial the lead's number from your Twilio number
     const dial = twiml.dial({ 
