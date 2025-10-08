@@ -43,89 +43,83 @@ app.get("/token", (req, res) => {
   res.send({ token: token.toJwt() });
 });
 
-// Handle TwiML instructions for outbound calls
-app.post("/voice", (req, res) => {
-  const twiml = new twilio.twiml.VoiceResponse();
-  let toNumber = req.body.To;
-  let fromNumber = req.body.From;
-  let channelID = req.body.ChannelID;
-
-  console.log(`fromNumber: ${fromNumber}, toNumber: ${toNumber}`);
-  if (toNumber) {
-    // Dial the lead's number from your Twilio number
-    const dial = twiml.dial({ 
-      callerId: fromNumber,
-      record: "record-from-answer-dual",
-      action: `${process.env.BASE_URL}/call-status`,  // final call status
-      method: "POST"
-    });
-    
-    
-    dial.number(toNumber);
-  } else {
-    console.log("No number provided.");
-    twiml.say("No number provided.");
-  }
-
-  res.type("text/xml");
-  res.send(twiml.toString());
-});
-
-app.get('/get-call-info', async (req, res) => {
-  const { callSid } = req.query;
-
-  try {
-    const call = await client.calls(callSid).fetch();
-    const recordings = await client.recordings.list({ callSid });
-
-    console.log(`call duration: ${ call.duration}`);
-    res.json({
-      duration: call.duration,  // in seconds
-      status: call.status,
-      recordingUrl: recordings.length > 0 ? recordings[0].mediaUrl : null
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.post("/leave-voicemail", async (req, res) => {
-  const { fromNumber, toNumber, voicemailUrl } = req.body;
+  const { fromNumber, toNumber, voicemailUrl, leadID, campaignID } = req.body;
 
-  if (!toNumber || !voicemailUrl) {
-    return res.status(400).json({ error: "toNumber and voicemailUrl required" });
+  if (!toNumber || !voicemailUrl || !leadID || !campaignID) {
+    return res.status(400).json({ error: "toNumber, voicemailUrl, leadID, and campaignID required" });
   }
 
   try {
+    const answerUrl = `${process.env.BASE_URL}/answer?voicemailUrl=${encodeURIComponent(voicemailUrl)}&leadID=${leadID}&campaignID=${campaignID}`;
+
     const call = await client.calls.create({
-      url: `${process.env.BASE_URL}/answer?voicemailUrl=${encodeURIComponent(voicemailUrl)}`,
+      url: answerUrl,
       to: toNumber,   // recipient
-      from: fromNumber, // your Twilio number
-      machineDetection: "DetectMessageEnd" // detect voicemail greeting end
+      from: fromNumber || twilioNumber, // use provided number or default Twilio number
+      machineDetection: "DetectMessageEnd", // detect voicemail greeting end
+      statusCallback: `${process.env.BASE_URL}/call-status?leadID=${leadID}&campaignID=${campaignID}`,
+      statusCallbackEvent: ['completed', 'failed', 'busy', 'no-answer']
     });
 
-    res.json({ success: true, callSid: call.sid });
+    console.log(`Call initiated: ${call.sid} for lead ${leadID}, campaign ${campaignID}`);
+    res.json({ success: true, callSid: call.sid, leadID, campaignID });
   } catch (err) {
-    console.error(err);
+    const sendTracking = async (status) => {
+    try {
+      await axios.post(`${process.env.BACKEND_URL}/api/voicemail/track`, {
+          leadID: leadID,
+          campaignID: campaignID,
+          status: status
+        });
+        console.log(`Tracking sent: ${status} for lead ${leadID}`);
+      } catch (error) {
+        console.error('Error sending tracking:', error.message);
+      }
+    };
+
+    await sendTracking("failed");
+    console.error('Error creating call:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-app.post("/answer", (req, res) => {
+app.post("/answer", async (req, res) => {
   const twiml = new twilio.twiml.VoiceResponse();
   const answeredBy = req.body.AnsweredBy || "unknown";
   const voicemailUrl = req.query.voicemailUrl;
-  console.log(`voiceemailurl left: ${voicemailUrl}`); 
+  const leadID = req.query.leadID;
+  const campaignID = req.query.campaignID;
+
+  console.log(`Answer webhook - AnsweredBy: ${answeredBy}, Lead: ${leadID}, Campaign: ${campaignID}`);
+  console.log(`Voicemail URL: ${voicemailUrl}`);
+
+  // Send tracking information to backend
+  const sendTracking = async (status) => {
+    try {
+      await axios.post(`${process.env.BACKEND_URL}/api/voicemail/track`, {
+        leadID: leadID,
+        campaignID: campaignID,
+        status: status
+      });
+      console.log(`Tracking sent: ${status} for lead ${leadID}`);
+    } catch (error) {
+      console.error('Error sending tracking:', error.message);
+    }
+  };
 
   if (answeredBy === "human") {
     // Human answered → play message right away
     twiml.play(voicemailUrl);
+    await sendTracking("human");
   } else if (answeredBy === "machine_end_beep") {
     // Voicemail detected, greeting finished → leave voicemail
     twiml.play(voicemailUrl);
+    await sendTracking("machine_end_beep");
   } else {
-    // Fallback if uncertain
+    // Fallback if uncertain or failed
     twiml.say("Sorry, we’ll try again later.");
+    await sendTracking("failed");
   }
 
   res.type("text/xml");
