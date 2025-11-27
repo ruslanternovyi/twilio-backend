@@ -159,17 +159,16 @@ app.post("/call-status", async (req, res) => {
 // Create a Conversation Intelligence Job when call ends
 async function createSummarizationJob(callSid) {
   try {
-    console.log("Creating CI Job for Call:", callSid);
-
-    const job = await client.conversations.v1
+    const job = await client.conversations.v1.conversationIntelligence
       .services(process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID)
       .jobs.create({
         callSid,
-        operatorNames: ["summarize"],  // built-in Operator
+        operatorNames: ["summarize"],
       });
 
     console.log("CI job created:", job.sid);
     return job.sid;
+
   } catch (err) {
     console.error("Error creating CI job:", err);
   }
@@ -177,18 +176,17 @@ async function createSummarizationJob(callSid) {
 
 async function getCallSummary(jobSid) {
   try {
-    const executions = await client.conversations.v1
+    const executions = await client.conversations.v1.conversationIntelligence
       .services(process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID)
       .jobs(jobSid)
       .executions.list();
 
     const summaryExecution = executions.find(
-      (ex) => ex.operatorName === "summarize"
+      (e) => e.operatorName === "summarize"
     );
 
-    if (!summaryExecution) return null;
+    return summaryExecution?.result?.text || null;
 
-    return summaryExecution.result?.text || null;
   } catch (err) {
     console.error("Error fetching summary:", err);
     return null;
