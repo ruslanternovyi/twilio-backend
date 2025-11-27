@@ -133,10 +133,67 @@ app.post("/answer", (req, res) => {
 });
 
 app.post("/call-status", async (req, res) => {
+  const callSid = req.body.CallSid;
+  const callStatus = req.body.CallStatus;
+
+  console.log("summary!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+  console.log("Call Status:", callStatus, "Call SID:", callSid);
+
+  // Only summarize when call is fully completed
+  if (callStatus === "completed") {
+    const jobSid = await createSummarizationJob(callSid);
+
+    // OPTIONAL: Poll for summary (3–10 seconds)
+    setTimeout(async () => {
+      const summary = await getCallSummary(jobSid);
+      console.log("Call Summary:", summary);
+
+      // TODO: Save to DB, send to frontend, etc.
+    }, 6000);
+  }
+
   res.sendStatus(200);
 });
 
 
+// Create a Conversation Intelligence Job when call ends
+async function createSummarizationJob(callSid) {
+  try {
+    console.log("Creating CI Job for Call:", callSid);
+
+    const job = await client.conversations.v1
+      .services(process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID)
+      .jobs.create({
+        callSid,
+        operatorNames: ["summarize"],  // built-in Operator
+      });
+
+    console.log("CI job created:", job.sid);
+    return job.sid;
+  } catch (err) {
+    console.error("Error creating CI job:", err);
+  }
+}
+
+async function getCallSummary(jobSid) {
+  try {
+    const executions = await client.conversations.v1
+      .services(process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID)
+      .jobs(jobSid)
+      .executions.list();
+
+    const summaryExecution = executions.find(
+      (ex) => ex.operatorName === "summarize"
+    );
+
+    if (!summaryExecution) return null;
+
+    return summaryExecution.result?.text || null;
+  } catch (err) {
+    console.error("Error fetching summary:", err);
+    return null;
+  }
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
