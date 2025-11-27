@@ -170,22 +170,17 @@ async function createSummarizationJob(callSid) {
     }
 
     const recordingSid = recordings[0].sid;
-    const mediaUrl = `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Recordings/${recordingSid}.wav`;
 
     // Create a transcript using the Voice Intelligence API
     const transcript = await client.intelligence.v2
       .transcripts
       .create({
         serviceSid: process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID,
-        channel: {
-          mediaProperties: {
-            mediaUrl: mediaUrl
-          },
-          participants: [
-            { userId: "agent", channelParticipant: 1 },
-            { userId: "customer", channelParticipant: 2 }
-          ]
-        }
+        channel: JSON.stringify({
+          media_properties: {
+            source_sid: recordingSid
+          }
+        })
       });
 
     console.log("Transcript created:", transcript.sid);
