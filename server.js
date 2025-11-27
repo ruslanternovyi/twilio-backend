@@ -136,56 +136,90 @@ app.post("/call-status", async (req, res) => {
   const callSid = req.body.CallSid;
   const callStatus = req.body.CallStatus;
 
-  console.log("summary!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
   console.log("Call Status:", callStatus, "Call SID:", callSid);
 
   // Only summarize when call is fully completed
   if (callStatus === "completed") {
-    const jobSid = await createSummarizationJob(callSid);
+    const transcriptSid = await createSummarizationJob(callSid);
 
-    // OPTIONAL: Poll for summary (3–10 seconds)
-    setTimeout(async () => {
-      const summary = await getCallSummary(jobSid);
-      console.log("Call Summary:", summary);
+    if (transcriptSid) {
+      // Transcription takes time - poll after 30 seconds
+      // For production, consider using webhooks instead
+      setTimeout(async () => {
+        const summary = await getCallSummary(transcriptSid);
+        console.log("Call Summary:", summary);
 
-      // TODO: Save to DB, send to frontend, etc.
-    }, 6000);
+        // TODO: Save to DB, send to frontend, etc.
+      }, 30000);
+    }
   }
 
   res.sendStatus(200);
 });
 
 
-// Create a Conversation Intelligence Job when call ends
+// Create a Conversation Intelligence Transcript when call ends
 async function createSummarizationJob(callSid) {
   try {
-    const job = await client.conversations.v1.conversationIntelligence
-      .services(process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID)
-      .jobs.create({
-        callSid,
-        operatorNames: ["summarize"],
+    // First, get the recording for this call
+    const recordings = await client.recordings.list({ callSid, limit: 1 });
+
+    if (recordings.length === 0) {
+      console.log("No recording found for call:", callSid);
+      return null;
+    }
+
+    const recordingSid = recordings[0].sid;
+    const mediaUrl = `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Recordings/${recordingSid}.wav`;
+
+    // Create a transcript using the Voice Intelligence API
+    const transcript = await client.intelligence.v2
+      .transcripts
+      .create({
+        serviceSid: process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID,
+        channel: {
+          mediaProperties: {
+            mediaUrl: mediaUrl
+          },
+          participants: [
+            { userId: "agent", channelParticipant: 1 },
+            { userId: "customer", channelParticipant: 2 }
+          ]
+        }
       });
 
-    console.log("CI job created:", job.sid);
-    return job.sid;
+    console.log("Transcript created:", transcript.sid);
+    return transcript.sid;
 
   } catch (err) {
-    console.error("Error creating CI job:", err);
+    console.error("Error creating transcript:", err);
+    return null;
   }
 }
 
-async function getCallSummary(jobSid) {
+async function getCallSummary(transcriptSid) {
   try {
-    const executions = await client.conversations.v1.conversationIntelligence
-      .services(process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID)
-      .jobs(jobSid)
-      .executions.list();
+    if (!transcriptSid) {
+      return null;
+    }
 
-    const summaryExecution = executions.find(
-      (e) => e.operatorName === "summarize"
+    // Fetch the operator results for the transcript
+    const operatorResults = await client.intelligence.v2
+      .transcripts(transcriptSid)
+      .operatorResults
+      .list();
+
+    // Find the summarize operator result
+    const summaryResult = operatorResults.find(
+      (result) => result.operatorType === "conversation_summarize" ||
+                  result.name?.toLowerCase().includes("summar")
     );
 
-    return summaryExecution?.result?.text || null;
+    if (summaryResult?.extractResults) {
+      return summaryResult.extractResults;
+    }
+
+    return null;
 
   } catch (err) {
     console.error("Error fetching summary:", err);
