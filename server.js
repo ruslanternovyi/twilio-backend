@@ -140,17 +140,28 @@ app.post("/call-status", async (req, res) => {
 
   // Only summarize when call is fully completed
   if (callStatus === "completed") {
-    const transcriptSid = await createSummarizationJob(callSid);
+    // Fetch call details to check duration
+    const call = await client.calls(callSid).fetch();
+    const duration = parseInt(call.duration, 10) || 0;
 
-    if (transcriptSid) {
-      // Transcription takes time - poll after 30 seconds
-      // For production, consider using webhooks instead
-      setTimeout(async () => {
-        const summary = await getCallSummary(transcriptSid);
-        console.log("Call Summary:", summary);
+    console.log("Call duration:", duration, "seconds");
 
-        // TODO: Save to DB, send to frontend, etc.
-      }, 30000);
+    // Only create transcript for calls over 50 seconds
+    if (duration > 50) {
+      const transcriptSid = await createSummarizationJob(callSid);
+
+      if (transcriptSid) {
+        // Transcription takes time - poll after 30 seconds
+        // For production, consider using webhooks instead
+        setTimeout(async () => {
+          const summary = await getCallSummary(transcriptSid);
+          console.log("Call Summary:", summary);
+
+          // TODO: Save to DB, send to frontend, etc.
+        }, 30000);
+      }
+    } else {
+      console.log("Call too short for summarization, skipping...");
     }
   }
 
@@ -197,6 +208,7 @@ async function createSummarizationJob(callSid) {
       },
       serviceSid: process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID,
     });
+    console.log(transcript);
 
     console.log("Transcript created:", transcript.sid);
     return transcript.sid;
