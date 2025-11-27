@@ -172,16 +172,14 @@ async function createSummarizationJob(callSid) {
     const recordingSid = recordings[0].sid;
 
     // Create a transcript using the Voice Intelligence API
-    const transcript = await client.intelligence.v2
-      .transcripts
-      .create({
-        serviceSid: process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID,
-        channel: JSON.stringify({
-          media_properties: {
-            source_sid: recordingSid
-          }
-        })
-      });
+    const transcript = await client.intelligence.v2.transcripts.create({
+      channel: {
+        media_properties: {
+          source_sid: recordingSid,
+        },
+      },
+      serviceSid: process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID,
+    });
 
     console.log("Transcript created:", transcript.sid);
     return transcript.sid;
