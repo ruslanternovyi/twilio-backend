@@ -158,24 +158,41 @@ app.post("/call-status", async (req, res) => {
 });
 
 
+// Helper function to wait for recording to be ready
+async function waitForRecording(callSid, maxAttempts = 10, delayMs = 3000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const recordings = await client.recordings.list({ callSid, limit: 1 });
+
+    if (recordings.length > 0 && recordings[0].status === "completed") {
+      console.log(`Recording ready after ${attempt} attempt(s)`);
+      return recordings[0];
+    }
+
+    console.log(`Waiting for recording... attempt ${attempt}/${maxAttempts}`);
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+
+  return null;
+}
+
 // Create a Conversation Intelligence Transcript when call ends
 async function createSummarizationJob(callSid) {
   try {
-    // First, get the recording for this call
-    const recordings = await client.recordings.list({ callSid, limit: 1 });
+    // Wait for the recording to be ready
+    const recording = await waitForRecording(callSid);
 
-    if (recordings.length === 0) {
-      console.log("No recording found for call:", callSid);
+    if (!recording) {
+      console.log("No completed recording found for call:", callSid);
       return null;
     }
 
-    const recordingSid = recordings[0].sid;
+    console.log("Recording found:", recording.sid, "Status:", recording.status);
 
     // Create a transcript using the Voice Intelligence API
     const transcript = await client.intelligence.v2.transcripts.create({
       channel: {
         media_properties: {
-          source_sid: recordingSid,
+          source_sid: recording.sid,
         },
       },
       serviceSid: process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID,
