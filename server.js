@@ -20,6 +20,39 @@ app.use(cors({ origin: "*" })); // for development only
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const twilioNumber = process.env.TWILIO_PHONE_NUMBER;
 
+// Language-specific Intelligence Service SIDs based on country calling codes
+const INTELLIGENCE_SERVICE_SIDS = {
+  "+46": "GA8d3288496e7de4b67c414a3b8c47c002",  // SE - Sweden
+  "+34": "GAdf2ee7a5d7d6bd4fea0bf2d468e345ab",  // ES - Spain
+  "+351": "Aba2c65165933047cb8af54b7cae63729",  // PT - Portugal
+  "+48": "GA34492937008b42a383b5972c739d792f",  // PL - Poland
+  "+47": "GAbd6cecc52eed69251d909ef263b7fb72",  // NO - Norway
+  "+39": "GA756e0686b44ed7b3f7ebf6282c6d4207",  // IT - Italy
+  "+49": "GAbf3506556dbf0edcd7a4869a08532631",  // DE - Germany
+  "+33": "GAf6e085d2f15aec836fac86fb832dea91",  // FR - France
+  "+31": "GA714dfc9bbd6b7d254e08c4b7a15e9333",  // NL - Netherlands
+  "+45": "GA83f41e1fdc0e12838904daecc1072bbc",  // DK - Denmark
+};
+const DEFAULT_SERVICE_SID = "GA21961a0d8e22442b498d6f5e970c45d4"; // EN - English (default)
+
+// Get the appropriate service SID based on phone number
+function getServiceSidForPhoneNumber(phoneNumber) {
+  if (!phoneNumber) return DEFAULT_SERVICE_SID;
+
+  // Check for matching country codes (longest match first)
+  const sortedCodes = Object.keys(INTELLIGENCE_SERVICE_SIDS).sort((a, b) => b.length - a.length);
+
+  for (const code of sortedCodes) {
+    if (phoneNumber.startsWith(code)) {
+      console.log(`Detected country code ${code} for ${phoneNumber}`);
+      return INTELLIGENCE_SERVICE_SIDS[code];
+    }
+  }
+
+  console.log(`No matching country code for ${phoneNumber}, using default (EN)`);
+  return DEFAULT_SERVICE_SID;
+}
+
 
 // Generate Access Token for browser
 app.get("/token", (req, res) => {
@@ -140,15 +173,16 @@ app.post("/call-status", async (req, res) => {
 
   // Only summarize when call is fully completed
   if (callStatus === "completed") {
-    // Fetch call details to check duration
+    // Fetch call details to check duration and get the 'To' number
     const call = await client.calls(callSid).fetch();
     const duration = parseInt(call.duration, 10) || 0;
+    const toNumber = call.to;
 
-    console.log("Call duration:", duration, "seconds");
+    console.log("Call duration:", duration, "seconds, To:", toNumber);
 
     // Only create transcript for calls over 50 seconds
     if (duration > 50) {
-      const transcriptSid = await createSummarizationJob(callSid);
+      const transcriptSid = await createSummarizationJob(callSid, toNumber);
 
       if (transcriptSid) {
         // Transcription takes time - poll after 30 seconds
@@ -187,7 +221,7 @@ async function waitForRecording(callSid, maxAttempts = 10, delayMs = 3000) {
 }
 
 // Create a Conversation Intelligence Transcript when call ends
-async function createSummarizationJob(callSid) {
+async function createSummarizationJob(callSid, toNumber) {
   try {
     // Wait for the recording to be ready
     const recording = await waitForRecording(callSid);
@@ -199,6 +233,10 @@ async function createSummarizationJob(callSid) {
 
     console.log("Recording found:", recording.sid, "Status:", recording.status);
 
+    // Get the appropriate service SID based on the destination phone number
+    const serviceSid = getServiceSidForPhoneNumber(toNumber);
+    console.log("Using Intelligence Service:", serviceSid);
+
     // Create a transcript using the Voice Intelligence API
     const transcript = await client.intelligence.v2.transcripts.create({
       channel: {
@@ -206,9 +244,8 @@ async function createSummarizationJob(callSid) {
           source_sid: recording.sid,
         },
       },
-      serviceSid: process.env.CONVERSATION_INTELLIGENCE_SERVICE_SID,
+      serviceSid: serviceSid,
     });
-    console.log(transcript);
 
     console.log("Transcript created:", transcript.sid);
     return transcript.sid;
