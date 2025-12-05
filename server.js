@@ -5,6 +5,7 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const axios = require("axios");
 const { jwt: { AccessToken } } = require("twilio");
+const pool = require("./config/database");
 
 const VoiceGrant = AccessToken.VoiceGrant;
 
@@ -35,6 +36,20 @@ const INTELLIGENCE_SERVICE_SIDS = {
 };
 const DEFAULT_SERVICE_SID = "GA21961a0d8e22442b498d6f5e970c45d4"; // EN - English (default)
 
+// Country code to language code mapping
+const COUNTRY_CODE_TO_LANGUAGE = {
+  "+46": "sv-SE",  // Sweden
+  "+34": "es-ES",  // Spain
+  "+351": "pt-PT", // Portugal
+  "+48": "pl-PL",  // Poland
+  "+47": "no-NO",  // Norway
+  "+39": "it-IT",  // Italy
+  "+49": "de-DE",  // Germany
+  "+33": "fr-FR",  // France
+  "+31": "nl-NL",  // Netherlands
+  "+45": "da-DK",  // Denmark
+};
+
 // Get the appropriate service SID based on phone number
 function getServiceSidForPhoneNumber(phoneNumber) {
   if (!phoneNumber) return DEFAULT_SERVICE_SID;
@@ -51,6 +66,21 @@ function getServiceSidForPhoneNumber(phoneNumber) {
 
   console.log(`No matching country code for ${phoneNumber}, using default (EN)`);
   return DEFAULT_SERVICE_SID;
+}
+
+// Detect language code from phone number
+function detectLanguageCode(phoneNumber) {
+  if (!phoneNumber) return "en-US";
+
+  const sortedCodes = Object.keys(COUNTRY_CODE_TO_LANGUAGE).sort((a, b) => b.length - a.length);
+
+  for (const code of sortedCodes) {
+    if (phoneNumber.startsWith(code)) {
+      return COUNTRY_CODE_TO_LANGUAGE[code];
+    }
+  }
+
+  return "en-US";
 }
 
 
@@ -173,25 +203,44 @@ app.post("/call-status", async (req, res) => {
 
   // Only summarize when call is fully completed
   if (callStatus === "completed") {
-    // Fetch call details to check duration and get the 'To' number
+    // Fetch call details to check duration and get call numbers
     const call = await client.calls(callSid).fetch();
     const duration = parseInt(call.duration, 10) || 0;
     const toNumber = call.to;
+    const fromNumber = call.from;
 
-    console.log("Call duration:", duration, "seconds, To:", toNumber);
+    console.log("Call duration:", duration, "seconds, From:", fromNumber, "To:", toNumber);
 
     // Only create transcript for calls over 50 seconds
     if (duration > 50) {
+      // Get user_id from the from_number
+      const userId = await getUserIdFromPhoneNumber(fromNumber);
+
       const transcriptSid = await createSummarizationJob(callSid, toNumber);
 
       if (transcriptSid) {
+        // Detect language code from to_number
+        const languageCode = detectLanguageCode(toNumber);
+
         // Transcription takes time - poll after 30 seconds
         // For production, consider using webhooks instead
         setTimeout(async () => {
           const summary = await getCallSummary(transcriptSid);
           console.log("Call Summary:", summary);
 
-          // TODO: Save to DB, send to frontend, etc.
+          // Save summary to database
+          if (summary) {
+            await saveCallSummary({
+              userId,
+              callSid,
+              transcriptSid,
+              fromNumber,
+              toNumber,
+              duration,
+              summary,
+              languageCode
+            });
+          }
         }, 30000);
       }
     } else {
@@ -282,6 +331,55 @@ async function getCallSummary(transcriptSid) {
 
   } catch (err) {
     console.error("Error fetching summary:", err);
+    return null;
+  }
+}
+
+// Get user_id from phone number (from_number)
+async function getUserIdFromPhoneNumber(phoneNumber) {
+  try {
+    if (!phoneNumber) return null;
+
+    // Normalize phone number (remove any non-digit characters except +)
+    const normalizedNumber = phoneNumber.replace(/[^\d+]/g, '');
+
+    const result = await pool.query(
+      `SELECT user_id FROM user_configurations WHERE phone_number = $1`,
+      [normalizedNumber]
+    );
+
+    if (result.rows.length > 0) {
+      console.log(`Found user_id ${result.rows[0].user_id} for phone number ${normalizedNumber}`);
+      return result.rows[0].user_id;
+    }
+
+    console.log(`No user found for phone number ${normalizedNumber}`);
+    return null;
+  } catch (err) {
+    console.error("Error getting user_id from phone number:", err);
+    return null;
+  }
+}
+
+// Save call summary to database
+async function saveCallSummary(callData) {
+  try {
+    const { userId, callSid, transcriptSid, fromNumber, toNumber, duration, summary, languageCode } = callData;
+
+    const result = await pool.query(
+      `INSERT INTO call_summaries (user_id, call_sid, transcript_sid, from_number, to_number, duration, summary, language_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (call_sid) DO UPDATE SET
+         summary = EXCLUDED.summary,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING id`,
+      [userId, callSid, transcriptSid, fromNumber, toNumber, duration, summary, languageCode]
+    );
+
+    console.log(`Call summary saved with id: ${result.rows[0].id}`);
+    return result.rows[0].id;
+  } catch (err) {
+    console.error("Error saving call summary:", err);
     return null;
   }
 }
