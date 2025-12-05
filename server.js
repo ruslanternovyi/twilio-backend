@@ -116,10 +116,10 @@ app.post("/voice", (req, res) => {
   console.log(`fromNumber: ${fromNumber}, toNumber: ${toNumber}`);
   if (toNumber) {
     // Dial the lead's number from your Twilio number
-    const dial = twiml.dial({ 
+    const dial = twiml.dial({
       callerId: fromNumber,
       record: "record-from-answer-dual",
-      action: `${process.env.BASE_URL}/call-status`,  // final call status
+      action: `${process.env.BASE_URL}/call-status?from=${encodeURIComponent(fromNumber)}&to=${encodeURIComponent(toNumber)}`,  // final call status
       method: "POST"
     });
     
@@ -199,15 +199,17 @@ app.post("/call-status", async (req, res) => {
   const callSid = req.body.CallSid;
   const callStatus = req.body.CallStatus;
 
+  // Get fromNumber and toNumber from query parameters (passed from /voice action URL)
+  const fromNumber = req.query.from;
+  const toNumber = req.query.to;
+
   console.log("Call Status:", callStatus, "Call SID:", callSid);
 
   // Only summarize when call is fully completed
   if (callStatus === "completed") {
-    // Fetch call details to check duration and get call numbers
+    // Fetch call details to check duration
     const call = await client.calls(callSid).fetch();
     const duration = parseInt(call.duration, 10) || 0;
-    const toNumber = call.to;
-    const fromNumber = call.from;
 
     console.log("Call duration:", duration, "seconds, From:", fromNumber, "To:", toNumber);
 
