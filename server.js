@@ -319,10 +319,12 @@ async function getCallSummary(transcriptSid) {
       .operatorResults
       .list();
 
+      console.log(operatorResults);
     // Find the summarize operator result
     const summaryResult = operatorResults.find(
-      (result) => result.name === "Conversation Summary" ||
-                  result.operatorType === "text-generation"
+      (result) => result.name === "Call Summary"
+      // (result) => result.name === "Call Summary" ||
+      //             result.operatorType === "text-generation"
     );
 
     if (summaryResult?.textGenerationResults?.result) {
