@@ -206,49 +206,49 @@ app.post("/call-status", async (req, res) => {
   console.log("Call Status:", callStatus, "Call SID:", callSid);
 
   // Only summarize when call is fully completed
-  if (callStatus === "completed") {
+  // if (callStatus === "completed") {
     // Fetch call details to check duration
-    const call = await client.calls(callSid).fetch();
-    const duration = parseInt(call.duration, 10) || 0;
+    // const call = await client.calls(callSid).fetch();
+    // const duration = parseInt(call.duration, 10) || 0;
 
-    console.log("Call duration:", duration, "seconds, From:", fromNumber, "To:", toNumber);
+    // console.log("Call duration:", duration, "seconds, From:", fromNumber, "To:", toNumber);
 
     // Only create transcript for calls over 50 seconds
-    if (duration > 50) {
-      // Get user_id from the from_number
-      const userId = await getUserIdFromPhoneNumber(fromNumber);
+    // if (duration > 50) {
+    //   // Get user_id from the from_number
+    //   const userId = await getUserIdFromPhoneNumber(fromNumber);
 
-      const transcriptSid = await createSummarizationJob(callSid, toNumber);
+    //   const transcriptSid = await createSummarizationJob(callSid, toNumber);
 
-      if (transcriptSid) {
-        // Detect language code from to_number
-        const languageCode = detectLanguageCode(toNumber);
+    //   if (transcriptSid) {
+    //     // Detect language code from to_number
+    //     const languageCode = detectLanguageCode(toNumber);
 
-        // Transcription takes time - poll after 30 seconds
-        // For production, consider using webhooks instead
-        setTimeout(async () => {
-          const summary = await getCallSummary(transcriptSid);
-          console.log("Call Summary:", summary);
+    //     // Transcription takes time - poll after 30 seconds
+    //     // For production, consider using webhooks instead
+    //     setTimeout(async () => {
+    //       const summary = await getCallSummary(transcriptSid);
+    //       console.log("Call Summary:", summary);
 
-          // Save summary to database
-          if (summary) {
-            await saveCallSummary({
-              userId,
-              callSid,
-              transcriptSid,
-              fromNumber,
-              toNumber,
-              duration,
-              summary,
-              languageCode
-            });
-          }
-        }, 30000);
-      }
-    } else {
-      console.log("Call too short for summarization, skipping...");
-    }
-  }
+    //       // Save summary to database
+    //       if (summary) {
+    //         await saveCallSummary({
+    //           userId,
+    //           callSid,
+    //           transcriptSid,
+    //           fromNumber,
+    //           toNumber,
+    //           duration,
+    //           summary,
+    //           languageCode
+    //         });
+    //       }
+    //     }, 30000);
+    //   }
+    // } else {
+    //   console.log("Call too short for summarization, skipping...");
+    // }
+  // }
 
   res.sendStatus(200);
 });
